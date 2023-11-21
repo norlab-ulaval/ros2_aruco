@@ -139,6 +139,7 @@ class ArucoNode(rclpy.node.Node):
         # Set up publishers
         self.poses_pub = self.create_publisher(PoseArray, "aruco_poses", 10)
         self.markers_pub = self.create_publisher(ArucoMarkers, "aruco_markers", 10)
+        self.detection_pub = self.create_publisher(Image, 'aruco_detections', 10)
 
         # Set up fields for camera parameters
         self.info_msg = None
@@ -204,6 +205,20 @@ class ArucoNode(rclpy.node.Node):
                 markers.poses.append(pose)
                 markers.marker_ids.append(marker_id[0])
 
+                cv2.drawFrameAxes(
+                    cv_image,
+                    self.intrinsic_mat,
+                    self.distortion,
+                    rvecs[i],
+                    tvecs[i],
+                    1.0,
+                    2
+                )
+
+            cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
+            ros_image = self.bridge.cv2_to_imgmsg(cv_image)
+
+            self.detection_pub.publish(ros_image)
             self.poses_pub.publish(pose_array)
             self.markers_pub.publish(markers)
 
