@@ -216,12 +216,12 @@ class ArucoNode(rclpy.node.Node):
                 )
 
             cv2.aruco.drawDetectedMarkers(cv_image, corners, marker_ids)
-            ros_image = self.bridge.cv2_to_imgmsg(cv_image)
 
-            self.detection_pub.publish(ros_image)
             self.poses_pub.publish(pose_array)
             self.markers_pub.publish(markers)
 
+        ros_image = self.bridge.cv2_to_imgmsg(cv_image)
+        self.detection_pub.publish(ros_image)
 
 def main():
     rclpy.init()
