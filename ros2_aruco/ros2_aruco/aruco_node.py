@@ -86,6 +86,15 @@ class ArucoNode(rclpy.node.Node):
         )
 
         self.declare_parameter(
+            name="annotated_aruco_topic",
+            value=f"{camera_ns}/aruco_annotated",
+            descriptor=ParameterDescriptor(
+                type=ParameterType.PARAMETER_STRING,
+                description="Published annotated image topic.",
+            ),
+        )
+
+        self.declare_parameter(
             name="camera_frame",
             value="",
             descriptor=ParameterDescriptor(
@@ -113,6 +122,13 @@ class ArucoNode(rclpy.node.Node):
             self.get_parameter("camera_info_topic").get_parameter_value().string_value
         )
         self.get_logger().info(f"Image info topic: {info_topic}")
+
+        annotated_topic = (
+            self.get_parameter("annotated_aruco_topic")
+            .get_parameter_value()
+            .string_value
+        )
+        self.get_logger().info(f"Annotated image topic: {annotated_topic}")
 
         self.camera_frame = (
             self.get_parameter("camera_frame").get_parameter_value().string_value
@@ -142,29 +158,43 @@ class ArucoNode(rclpy.node.Node):
         # Set up publishers
         self.poses_pub = self.create_publisher(PoseArray, "aruco_poses", 10)
         self.markers_pub = self.create_publisher(ArucoMarkers, "aruco_markers", 10)
+        self.annotated_pub = self.create_publisher(
+            Image,
+            annotated_topic,
+            10,
+        )
 
         # Set up fields for camera parameters
         self.info_msg = None
         self.intrinsic_mat = None
         self.distortion = None
 
-        self.aruco_dictionary = cv2.aruco.Dictionary_get(dictionary_id)
-        self.aruco_parameters = cv2.aruco.DetectorParameters_create()
+        self.aruco_dictionary = cv2.aruco.getPredefinedDictionary(dictionary_id)
+        self.aruco_detector = cv2.aruco.ArucoDetector(
+            dictionary=self.aruco_dictionary,
+        )
         self.bridge = CvBridge()
 
-    def info_callback(self, info_msg):
+    def info_callback(self, info_msg: CameraInfo):
         self.info_msg = info_msg
         self.intrinsic_mat = np.reshape(np.array(self.info_msg.k), (3, 3))
         self.distortion = np.array(self.info_msg.d)
         # Assume that camera parameters will remain the same...
         self.destroy_subscription(self.info_sub)
 
-    def image_callback(self, img_msg):
+    def image_callback(self, img_msg: Image):
         if self.info_msg is None:
             self.get_logger().warn("No camera info has been received!")
             return
 
-        cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="mono8")
+        cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="passthrough")
+        annot_frame = cv_image.copy()
+
+        if "rgb" in img_msg.encoding:
+            gray = cv2.cvtColor(cv_image, cv2.COLOR_RGB2GRAY)
+        elif "bgr" in img_msg.encoding:
+            gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+
         markers = ArucoMarkers()
         pose_array = PoseArray()
         if self.camera_frame == "":
@@ -177,26 +207,46 @@ class ArucoNode(rclpy.node.Node):
         markers.header.stamp = img_msg.header.stamp
         pose_array.header.stamp = img_msg.header.stamp
 
-        corners, marker_ids, rejected = cv2.aruco.detectMarkers(
-            cv_image, self.aruco_dictionary, parameters=self.aruco_parameters
-        )
+        corners, marker_ids, rejected = self.aruco_detector.detectMarkers(gray)
+
         if marker_ids is not None:
+            # Annotate image
+            cv2.aruco.drawDetectedMarkers(annot_frame, corners)
+
             if cv2.__version__ > "4.0.0":
                 rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                    corners, self.marker_size, self.intrinsic_mat, self.distortion
+                    corners,
+                    self.marker_size,
+                    self.intrinsic_mat,
+                    self.distortion,
                 )
             else:
                 rvecs, tvecs = cv2.aruco.estimatePoseSingleMarkers(
-                    corners, self.marker_size, self.intrinsic_mat, self.distortion
+                    corners,
+                    self.marker_size,
+                    self.intrinsic_mat,
+                    self.distortion,
                 )
-            for i, marker_id in enumerate(marker_ids):
+
+            for i, (marker_id, tvec, rvec) in enumerate(zip(marker_ids, tvecs, rvecs)):
+                # Draw marker
+                cv2.drawFrameAxes(
+                    annot_frame,
+                    self.intrinsic_mat,
+                    self.distortion,
+                    rvec,
+                    tvec,
+                    self.marker_size,
+                )
+
+                # Get pose
                 pose = Pose()
-                pose.position.x = tvecs[i][0][0]
-                pose.position.y = tvecs[i][0][1]
-                pose.position.z = tvecs[i][0][2]
+                pose.position.x = tvec[0][0]
+                pose.position.y = tvec[0][1]
+                pose.position.z = tvec[0][2]
 
                 rot_matrix = np.eye(4)
-                rot_matrix[0:3, 0:3] = cv2.Rodrigues(np.array(rvecs[i][0]))[0]
+                rot_matrix[0:3, 0:3] = cv2.Rodrigues(np.array(rvec[0]))[0]
                 quat = tf_transformations.quaternion_from_matrix(rot_matrix)
 
                 pose.orientation.x = quat[0]
@@ -210,6 +260,10 @@ class ArucoNode(rclpy.node.Node):
 
             self.poses_pub.publish(pose_array)
             self.markers_pub.publish(markers)
+
+        annotated_msg = self.bridge.cv2_to_imgmsg(annot_frame)
+        annotated_msg.header = img_msg.header
+        self.annotated_pub.publish(annotated_msg)
 
 
 def main():
