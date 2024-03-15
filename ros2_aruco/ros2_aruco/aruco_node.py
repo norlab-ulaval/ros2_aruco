@@ -45,6 +45,9 @@ class ArucoNode(rclpy.node.Node):
     def __init__(self):
         super().__init__("aruco_node")
 
+        # Camera namespace
+        camera_ns = self.get_namespace() or "/camera"
+
         # Declare and read parameters
         self.declare_parameter(
             name="marker_size",
@@ -66,7 +69,7 @@ class ArucoNode(rclpy.node.Node):
 
         self.declare_parameter(
             name="image_topic",
-            value="/camera/image_raw",
+            value=f"{camera_ns}/image_raw",
             descriptor=ParameterDescriptor(
                 type=ParameterType.PARAMETER_STRING,
                 description="Image topic to subscribe to.",
@@ -75,7 +78,7 @@ class ArucoNode(rclpy.node.Node):
 
         self.declare_parameter(
             name="camera_info_topic",
-            value="/camera/camera_info",
+            value=f"{camera_ns}/camera_info",
             descriptor=ParameterDescriptor(
                 type=ParameterType.PARAMETER_STRING,
                 description="Camera info topic to subscribe to.",
