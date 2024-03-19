@@ -190,9 +190,9 @@ class ArucoNode(rclpy.node.Node):
         cv_image = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="passthrough")
         annot_frame = cv_image.copy()
 
-        if "rgb" in img_msg.encoding:
+        if "rgb" in img_msg.encoding.lower():
             gray = cv2.cvtColor(cv_image, cv2.COLOR_RGB2GRAY)
-        elif "bgr" in img_msg.encoding:
+        elif "bgr" in img_msg.encoding.lower():
             gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
 
         markers = ArucoMarkers()
@@ -258,8 +258,8 @@ class ArucoNode(rclpy.node.Node):
                 markers.poses.append(pose)
                 markers.marker_ids.append(marker_id[0])
 
-            self.poses_pub.publish(pose_array)
-            self.markers_pub.publish(markers)
+        self.markers_pub.publish(markers)
+        self.poses_pub.publish(pose_array)
 
         annotated_msg = self.bridge.cv2_to_imgmsg(annot_frame)
         annotated_msg.header = img_msg.header
